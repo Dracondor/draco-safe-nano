@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Draco-Safe Nano - Der einfache, sichere Passwort-Manager
-Version 1.1 | Freeware | MIT-Lizenz
+Version 1.1.9 | Freeware | MIT-Lizenz
 """
 import os, sys, json, secrets, string, hashlib, base64, re, time, shutil, webbrowser
 from tkinter import messagebox, filedialog
@@ -24,17 +24,15 @@ HOMEPAGE = "https://dracondors-heim.de"
 class DracoSafeNano(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Draco-Safe Nano v1.1")
+        self.title("Draco-Safe Nano v1.1.9")
         self.geometry("1100x800")
         self.resizable(True, True)
         self.configure(fg_color=FARBE_DUNKEL)
 
-        # Datenverzeichnis
         self.data_dir = os.path.join(os.path.expanduser("~"), ".draco_safe_nano")
         os.makedirs(self.data_dir, exist_ok=True)
         self.vault_file = os.path.join(self.data_dir, "vault.dat")
         
-        # Datenstruktur
         self.data = {
             "salt": None,
             "entries": [],
@@ -45,17 +43,16 @@ class DracoSafeNano(ctk.CTk):
         self.current_category = "Allgemein"
         self.filtered_entries = []
         
-        # Virtuelle Tastatur
         self.keyboard_visible = False
         self.current_focus = None
         self.shift = False
         self.key_buttons = []
+        self.keyboard_frame = None
+        self.shift_btn = None
         
-        # Schutz vor Brute-Force
         self.login_attempts = 0
         self.locked_until = 0
         
-        # Tastaturkürzel
         self.bind_all("<Control-s>", lambda e: self.save_entry())
         self.bind_all("<Control-n>", lambda e: self.focus_new_entry())
         self.bind_all("<Control-f>", lambda e: self.search_entry.focus_set() if hasattr(self, 'search_entry') else None)
@@ -118,9 +115,11 @@ class DracoSafeNano(ctk.CTk):
     # ===== VIRTUELLE TASTATUR =====
     def toggle_keyboard(self):
         if self.keyboard_visible:
-            self.keyboard_frame.pack_forget()
+            if self.keyboard_frame:
+                self.keyboard_frame.pack_forget()
         else:
-            self.keyboard_frame.pack(side="bottom", fill="x", padx=10, pady=5)
+            if self.keyboard_frame:
+                self.keyboard_frame.pack(side="bottom", fill="x", padx=10, pady=5)
         self.keyboard_visible = not self.keyboard_visible
     
     def set_focus(self, widget):
@@ -131,10 +130,22 @@ class DracoSafeNano(ctk.CTk):
         for btn in self.key_buttons:
             text = btn.cget("text")
             if len(text) == 1 and text.isalpha():
-                btn.configure(text=text.upper() if self.shift else text.lower())
+                if self.shift:
+                    btn.configure(text=text.upper())
+                else:
+                    btn.configure(text=text.lower())
+            elif text in ['Ä', 'Ö', 'Ü', 'ß']:
+                if self.shift:
+                    btn.configure(text=text.upper())
+                else:
+                    btn.configure(text=text.lower())
+        if self.shift_btn:
+            self.shift_btn.configure(fg_color="#2ecc71" if self.shift else FARBE_GRUEN_HELL)
     
     def key_press(self, char):
         if self.current_focus:
+            if self.shift and char.isalpha():
+                char = char.upper()
             if isinstance(self.current_focus, ctk.CTkEntry):
                 self.current_focus.insert(ctk.END, char)
             elif isinstance(self.current_focus, ctk.CTkTextbox):
@@ -160,118 +171,72 @@ class DracoSafeNano(ctk.CTk):
         self.keyboard_frame = ctk.CTkFrame(parent, fg_color=FARBE_GRUEN)
         self.key_buttons = []
         
-        # Buchstabenreihen
-        rows = [
-            ['Q', 'W', 'E', 'R', 'T', 'Z', 'U', 'I', 'O', 'P'],
-            ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
-            ['Y', 'X', 'C', 'V', 'B', 'N', 'M']
-        ]
+        number_frame = ctk.CTkFrame(self.keyboard_frame, fg_color="transparent")
+        number_frame.pack(pady=1)
+        for char in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']:
+            btn = ctk.CTkButton(number_frame, text=char, width=45, height=35, font=("Arial", 12, "bold"), fg_color="#1a5a3a", command=lambda c=char: self.key_press(c))
+            btn.pack(side="left", padx=1)
+            self.key_buttons.append(btn)
         
+        rows = [
+            ['q', 'w', 'e', 'r', 't', 'z', 'u', 'i', 'o', 'p', 'ü'],
+            ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'ö', 'ä'],
+            ['y', 'x', 'c', 'v', 'b', 'n', 'm', 'ß']
+        ]
         for row in rows:
             frame = ctk.CTkFrame(self.keyboard_frame, fg_color="transparent")
             frame.pack(pady=1)
             for char in row:
-                btn = ctk.CTkButton(
-                    frame, 
-                    text=char, 
-                    width=45, 
-                    height=35, 
-                    font=("Arial", 12, "bold"),
-                    fg_color=FARBE_GRUEN_HELL,
-                    command=lambda c=char.lower(): self.key_press(c)
-                )
+                btn = ctk.CTkButton(frame, text=char, width=45, height=35, font=("Arial", 12, "bold"), fg_color=FARBE_GRUEN_HELL, command=lambda c=char: self.key_press(c))
                 btn.pack(side="left", padx=1)
                 self.key_buttons.append(btn)
         
-        # Sonderzeichen
-        special_chars = [
-            ['!', '?', '@', '-', '_', '.', ',', ';', ':'],
+        special_rows = [
+            ['!', '?', '@', '-', '_', '.', ',', ';', ':', '"', "'"],
             ['#', '+', '*', '=', '/', '(', ')', '[', ']', '{', '}'],
-            ['<', '>', '|', '&', '$', '%', '°', '~', '^']
+            ['<', '>', '|', '&', '$', '%', '°', '~', '^', '€']
         ]
-        
-        for row in special_chars:
+        for row in special_rows:
             frame = ctk.CTkFrame(self.keyboard_frame, fg_color="transparent")
             frame.pack(pady=1)
             for char in row:
-                btn = ctk.CTkButton(
-                    frame,
-                    text=char,
-                    width=40,
-                    height=35,
-                    font=("Arial", 12, "bold"),
-                    fg_color="#254D38",
-                    command=lambda c=char: self.key_press(c)
-                )
+                btn = ctk.CTkButton(frame, text=char, width=40, height=35, font=("Arial", 12, "bold"), fg_color="#254D38", command=lambda c=char: self.key_press(c))
                 btn.pack(side="left", padx=1)
                 self.key_buttons.append(btn)
         
-        # Steuerbuttons
         control_frame = ctk.CTkFrame(self.keyboard_frame, fg_color="transparent")
         control_frame.pack(pady=1)
         
-        ctk.CTkButton(
-            control_frame, 
-            text="Shift", 
-            width=60, 
-            height=35, 
-            fg_color=FARBE_GRUEN_HELL,
-            command=self.toggle_shift
-        ).pack(side="left", padx=2)
+        self.shift_btn = ctk.CTkButton(control_frame, text="⇧ Shift", width=70, height=35, fg_color=FARBE_GRUEN_HELL, command=self.toggle_shift)
+        self.shift_btn.pack(side="left", padx=2)
         
-        ctk.CTkButton(
-            control_frame, 
-            text="⌫", 
-            width=60, 
-            height=35, 
-            fg_color="#A32424",
-            command=self.key_backspace
-        ).pack(side="left", padx=2)
-        
-        ctk.CTkButton(
-            control_frame, 
-            text="C", 
-            width=50, 
-            height=35, 
-            fg_color="#A32424",
-            command=self.key_clear
-        ).pack(side="left", padx=2)
-        
-        ctk.CTkButton(
-            control_frame, 
-            text="Leerzeichen", 
-            width=100, 
-            height=35, 
-            fg_color="#4A4A4A",
-            command=lambda: self.key_press(" ")
-        ).pack(side="left", padx=2)
-        
-        ctk.CTkButton(
-            control_frame, 
-            text="Hide ⌨", 
-            width=70, 
-            height=35, 
-            fg_color="#4A4A4A",
-            command=self.toggle_keyboard
-        ).pack(side="left", padx=2)
+        ctk.CTkButton(control_frame, text="⌫", width=60, height=35, fg_color="#A32424", command=self.key_backspace).pack(side="left", padx=2)
+        ctk.CTkButton(control_frame, text="✕ Löschen", width=80, height=35, fg_color="#A32424", command=self.key_clear).pack(side="left", padx=2)
+        ctk.CTkButton(control_frame, text="Leerzeichen", width=100, height=35, fg_color="#4A4A4A", command=lambda: self.key_press(" ")).pack(side="left", padx=2)
+        ctk.CTkButton(control_frame, text="⌨ Hide", width=80, height=35, fg_color="#4A4A4A", command=self.toggle_keyboard).pack(side="left", padx=2)
     
     # ===== LOGIN =====
     def init_login(self):
         self.login_frame = ctk.CTkFrame(self, fg_color=FARBE_GRUEN, border_color=FARBE_WEISS, border_width=2)
         self.login_frame.pack(fill="both", expand=True, padx=40, pady=40)
         
-        ctk.CTkLabel(self.login_frame, text="🐉 Draco-Safe Nano", font=("Arial", 32, "bold"), 
-                     text_color=FARBE_WEISS).pack(pady=(20, 5))
-        ctk.CTkLabel(self.login_frame, text="Einfach. Sicher. Kostenlos.", 
-                     font=("Arial", 13), text_color=FARBE_WEISS).pack(pady=(0, 20))
+        ctk.CTkLabel(self.login_frame, text="🐉 Draco-Safe Nano", font=("Arial", 32, "bold"), text_color=FARBE_WEISS).pack(pady=(20, 5))
+        ctk.CTkLabel(self.login_frame, text="Einfach. Sicher. Kostenlos.", font=("Arial", 13), text_color=FARBE_WEISS).pack(pady=(0, 20))
         
         frame = ctk.CTkFrame(self.login_frame, fg_color="transparent")
         frame.pack(expand=True)
         
         ctk.CTkLabel(frame, text="Master-Passwort", font=("Arial", 12), text_color=FARBE_WEISS).pack(pady=(10, 0))
-        self.pw1 = ctk.CTkEntry(frame, width=250, show="*", font=("Arial", 14))
-        self.pw1.pack(pady=5)
+        
+        pw_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        pw_frame.pack(pady=5)
+        
+        self.pw1 = ctk.CTkEntry(pw_frame, width=200, show="*", font=("Arial", 14))
+        self.pw1.pack(side="left", padx=5)
         self.pw1.bind("<FocusIn>", lambda e: self.set_focus(self.pw1))
+        
+        self.show_pw_btn = ctk.CTkButton(pw_frame, text="👁", width=30, height=30, fg_color="#4A4A4A", command=self.toggle_password_visibility)
+        self.show_pw_btn.pack(side="left", padx=2)
         
         ctk.CTkLabel(frame, text="Wiederholen", font=("Arial", 12), text_color=FARBE_WEISS).pack(pady=(10, 0))
         self.pw2 = ctk.CTkEntry(frame, width=250, show="*", font=("Arial", 14))
@@ -283,21 +248,22 @@ class DracoSafeNano(ctk.CTk):
         ctk.CTkButton(btn_frame, text="Login / Neu", width=120, command=self.login).pack(side="left", padx=5)
         ctk.CTkButton(btn_frame, text="⌨ Tastatur", width=100, fg_color="#4A4A4A", command=self.toggle_keyboard).pack(side="left", padx=5)
         
-        # 🔗 Link zur Homepage (klickbar)
         link_frame = ctk.CTkFrame(self.login_frame, fg_color="transparent")
         link_frame.pack(pady=10)
-        
-        homepage_link = ctk.CTkLabel(
-            link_frame, 
-            text="🌐 https://dracondors-heim.de", 
-            font=("Arial", 10, "underline"),
-            text_color=FARBE_WEISS,
-            cursor="hand2"
-        )
+        homepage_link = ctk.CTkLabel(link_frame, text="🌐 https://dracondors-heim.de", font=("Arial", 10, "underline"), text_color=FARBE_WEISS, cursor="hand2")
         homepage_link.pack()
         homepage_link.bind("<Button-1>", lambda e: webbrowser.open(HOMEPAGE))
         
         self.create_keyboard(self.login_frame)
+        self.keyboard_frame.pack_forget()
+    
+    def toggle_password_visibility(self):
+        if self.pw1.cget("show") == "*":
+            self.pw1.configure(show="")
+            self.show_pw_btn.configure(text="🙈")
+        else:
+            self.pw1.configure(show="*")
+            self.show_pw_btn.configure(text="👁")
     
     def login(self):
         now = time.time()
@@ -341,11 +307,9 @@ class DracoSafeNano(ctk.CTk):
     
     # ===== HAUPTFENSTER =====
     def main_app(self):
-        # Hauptrahmen
         main = ctk.CTkFrame(self, fg_color=FARBE_DUNKEL)
         main.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Linke Spalte - Kategorien
         left = ctk.CTkFrame(main, width=230, fg_color=FARBE_GRUEN, border_color=FARBE_WEISS, border_width=1)
         left.pack(side="left", fill="y", padx=(0, 10))
         
@@ -362,15 +326,13 @@ class DracoSafeNano(ctk.CTk):
         
         ctk.CTkLabel(left, text="", height=10).pack()
         ctk.CTkButton(left, text="💾 Notizen", width=210, fg_color="#4A4A4A", command=self.open_notes).pack(pady=2)
-        ctk.CTkButton(left, text="📤 Export", width=210, fg_color="#4A4A4A", command=self.export_data).pack(pady=2)
+        ctk.CTkButton(left, text="📤 Export (verschlüsselt)", width=210, fg_color="#4A4A4A", command=self.export_data).pack(pady=2)
         ctk.CTkButton(left, text="📥 Import", width=210, fg_color="#4A4A4A", command=self.import_data).pack(pady=2)
         ctk.CTkButton(left, text="⌨ Tastatur (Strg+K)", width=210, fg_color="#4A4A4A", command=self.toggle_keyboard).pack(pady=2)
         
-        # Rechte Spalte
         right = ctk.CTkFrame(main, fg_color=FARBE_GRUEN, border_color=FARBE_WEISS, border_width=1)
         right.pack(side="right", fill="both", expand=True)
         
-        # Suchleiste
         top = ctk.CTkFrame(right, fg_color="transparent")
         top.pack(fill="x", padx=10, pady=5)
         self.cat_title = ctk.CTkLabel(top, text=self.current_category, font=("Arial", 18, "bold"), text_color=FARBE_WEISS)
@@ -381,7 +343,6 @@ class DracoSafeNano(ctk.CTk):
         self.search_entry.bind("<FocusIn>", lambda e: self.set_focus(self.search_entry))
         self.search_entry.bind("<KeyRelease>", lambda e: self.filter_entries())
         
-        # Eintragsliste
         header = ctk.CTkFrame(right, fg_color=FARBE_DUNKEL)
         header.pack(fill="x", padx=15, pady=5)
         for t, w in [("Dienst", 200), ("Benutzer", 150), ("Passwort", 150)]:
@@ -393,7 +354,6 @@ class DracoSafeNano(ctk.CTk):
         self.entry_list.pack(fill="both", expand=True, padx=10, pady=5)
         self.entry_list.bind("<ButtonRelease-1>", self.on_select)
         
-        # Eingabeformular
         form = ctk.CTkFrame(right, fg_color=FARBE_GRUEN, border_color=FARBE_WEISS, border_width=1)
         form.pack(fill="x", padx=15, pady=10)
         ctk.CTkLabel(form, text="Neuer Eintrag:", font=("Arial", 13, "bold"), text_color=FARBE_WEISS).pack(pady=5)
@@ -436,8 +396,8 @@ class DracoSafeNano(ctk.CTk):
         ctk.CTkButton(btn_row, text="🗑 Löschen", width=100, fg_color="#A32424", command=self.delete_entry).pack(side="left", padx=5)
         ctk.CTkButton(btn_row, text="🔒 Sperren", width=100, fg_color="#4A4A4A", command=self.lock).pack(side="right", padx=2)
         
-        # Virtuelle Tastatur für Hauptfenster
         self.create_keyboard(main)
+        self.keyboard_frame.pack_forget()
         
         self.render_categories()
         self.render_entries()
@@ -449,8 +409,7 @@ class DracoSafeNano(ctk.CTk):
         self.cat_buttons.clear()
         for cat in self.data["categories"]:
             is_active = (cat == self.current_category)
-            b = ctk.CTkButton(self.cat_frame, text=cat, fg_color="#145A32" if is_active else "#254D38",
-                              command=lambda x=cat: self.switch_category(x))
+            b = ctk.CTkButton(self.cat_frame, text=cat, fg_color="#145A32" if is_active else "#254D38", command=lambda x=cat: self.switch_category(x))
             b.pack(fill="x", pady=2)
             self.cat_buttons.append(b)
     
@@ -467,17 +426,20 @@ class DracoSafeNano(ctk.CTk):
             self._save_vault(self.master_password)
             self.new_cat.delete(0, "end")
             self.render_categories()
+            messagebox.showinfo("Erfolg", f"Kategorie '{name}' wurde hinzugefügt!")
+        elif name in self.data["categories"]:
+            messagebox.showwarning("Warnung", "Diese Kategorie existiert bereits!")
+        else:
+            messagebox.showwarning("Warnung", "Bitte einen Namen eingeben!")
     
     # ===== EINTRÄGE =====
     def render_entries(self):
         self.entry_list.configure(state="normal")
         self.entry_list.delete("1.0", "end")
-        
         entries = [e for e in self.data["entries"] if e.get("category") == self.current_category]
         if self.search_entry.get():
             term = self.search_entry.get().lower()
             entries = [e for e in entries if term in e.get("service", "").lower() or term in e.get("user", "").lower()]
-        
         if not entries:
             self.entry_list.insert("1.0", "Keine Einträge")
         else:
@@ -501,7 +463,6 @@ class DracoSafeNano(ctk.CTk):
                     self.e_user.insert(0, parts[1])
                     self.e_pass.delete(0, "end")
                     self.e_pass.insert(0, parts[2])
-                    # URL und Notiz laden
                     for entry in self.data["entries"]:
                         if entry.get("category") == self.current_category and entry["service"] == parts[0]:
                             self.e_url.delete(0, "end")
@@ -521,22 +482,17 @@ class DracoSafeNano(ctk.CTk):
         password = self.e_pass.get().strip()
         url = self.e_url.get().strip()
         note = self.e_note.get("1.0", "end-1c").strip()
-        
-        # Prüfen ob vorhanden
         for i, e in enumerate(self.data["entries"]):
             if e.get("category") == self.current_category and e["service"] == service:
                 if messagebox.askyesno("", "Eintrag existiert bereits. Überschreiben?"):
-                    self.data["entries"][i] = {"category": self.current_category, "service": service, 
-                                              "user": user, "password": password, "url": url, "note": note}
+                    self.data["entries"][i] = {"category": self.current_category, "service": service, "user": user, "password": password, "url": url, "note": note}
                 else:
                     return
                 self._save_vault(self.master_password)
                 self.render_entries()
                 self.clear_form()
                 return
-        
-        self.data["entries"].append({"category": self.current_category, "service": service, 
-                                    "user": user, "password": password, "url": url, "note": note})
+        self.data["entries"].append({"category": self.current_category, "service": service, "user": user, "password": password, "url": url, "note": note})
         self._save_vault(self.master_password)
         self.render_entries()
         self.clear_form()
@@ -600,23 +556,54 @@ class DracoSafeNano(ctk.CTk):
             win.destroy()
         ctk.CTkButton(win, text="💾 Speichern", width=120, fg_color=FARBE_GRUEN_HELL, command=save).pack(pady=10)
     
-    # ===== EXPORT / IMPORT =====
+    # ===== EXPORT (VERSCHLÜSSELT) =====
     def export_data(self):
-        path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")])
+        """Exportiert die Daten in eine verschlüsselte .draco-Datei"""
+        if not self.master_password:
+            messagebox.showerror("Fehler", "Kein Master-Passwort vorhanden!")
+            return
+        
+        path = filedialog.asksaveasfilename(
+            defaultextension=".draco",
+            filetypes=[("DracoSafe Backup", "*.draco")]
+        )
         if path:
-            with open(path, "w") as f:
-                json.dump(self.data, f, indent=2)
-            messagebox.showinfo("Erfolg", "Export abgeschlossen!")
+            try:
+                # Verschlüsselte Kopie der Daten erstellen
+                salt = os.urandom(16)
+                encrypted = self._encrypt(self.data, self.master_password, salt)
+                with open(path, "wb") as f:
+                    f.write(encrypted)
+                messagebox.showinfo("Erfolg", 
+                    "Backup wurde verschlüsselt gespeichert!\n\n"
+                    "Die Datei kann nur mit Ihrem Master-Passwort geöffnet werden.")
+            except Exception as e:
+                messagebox.showerror("Fehler", f"Export fehlgeschlagen: {e}")
     
+    # ===== IMPORT (VERSCHLÜSSELT) =====
     def import_data(self):
-        path = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
+        """Importiert eine verschlüsselte .draco-Datei"""
+        path = filedialog.askopenfilename(
+            filetypes=[("DracoSafe Backup", "*.draco")]
+        )
         if path:
-            with open(path, "r") as f:
-                self.data = json.load(f)
-            self._save_vault(self.master_password)
-            self.render_categories()
-            self.render_entries()
-            messagebox.showinfo("Erfolg", "Import abgeschlossen!")
+            try:
+                with open(path, "rb") as f:
+                    encrypted = f.read()
+                data = self._decrypt(encrypted, self.master_password)
+                if data is None:
+                    messagebox.showerror("Fehler", 
+                        "Falsches Passwort oder beschädigte Datei!")
+                    return
+                
+                # Daten übernehmen
+                self.data = data
+                self._save_vault(self.master_password)
+                self.render_categories()
+                self.render_entries()
+                messagebox.showinfo("Erfolg", "Import erfolgreich!")
+            except Exception as e:
+                messagebox.showerror("Fehler", f"Import fehlgeschlagen: {e}")
     
     # ===== SPERREN =====
     def lock(self):
