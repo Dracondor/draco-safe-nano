@@ -4,7 +4,7 @@
 Draco-Safe Nano - Der einfache, sichere Passwort-Manager
 Version 1.1 | Freeware | MIT-Lizenz
 """
-import os, sys, json, secrets, string, hashlib, base64, re, time, shutil
+import os, sys, json, secrets, string, hashlib, base64, re, time, shutil, webbrowser
 from tkinter import messagebox, filedialog
 import customtkinter as ctk
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -18,6 +18,7 @@ FARBE_GRUEN = "#1B4D3E"
 FARBE_DUNKEL = "#112B1C"
 FARBE_WEISS = "#FFFFFF"
 FARBE_GRUEN_HELL = "#145A32"
+HOMEPAGE = "https://dracondors-heim.de"
 
 # ===== HAUPTKLASSE =====
 class DracoSafeNano(ctk.CTk):
@@ -281,6 +282,20 @@ class DracoSafeNano(ctk.CTk):
         btn_frame.pack(pady=10)
         ctk.CTkButton(btn_frame, text="Login / Neu", width=120, command=self.login).pack(side="left", padx=5)
         ctk.CTkButton(btn_frame, text="⌨ Tastatur", width=100, fg_color="#4A4A4A", command=self.toggle_keyboard).pack(side="left", padx=5)
+        
+        # 🔗 Link zur Homepage (klickbar)
+        link_frame = ctk.CTkFrame(self.login_frame, fg_color="transparent")
+        link_frame.pack(pady=10)
+        
+        homepage_link = ctk.CTkLabel(
+            link_frame, 
+            text="🌐 https://dracondors-heim.de", 
+            font=("Arial", 10, "underline"),
+            text_color=FARBE_WEISS,
+            cursor="hand2"
+        )
+        homepage_link.pack()
+        homepage_link.bind("<Button-1>", lambda e: webbrowser.open(HOMEPAGE))
         
         self.create_keyboard(self.login_frame)
     
