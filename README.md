@@ -37,3 +37,4 @@ Laden Sie [Python 3.8+](https://python.org/downloads/) herunter und installieren
 ```bash
 git clone https://github.com/Dracondor/draco-safe-nano.git
 cd draco-safe-nano
+https://dracondors-heim.de
