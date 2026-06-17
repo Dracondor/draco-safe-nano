@@ -50,8 +50,16 @@ class DracoSafeNano(ctk.CTk):
         self.keyboard_frame = None
         self.shift_btn = None
         
+        self.lock_file = os.path.join(self.data_dir, "lock.dat")
         self.login_attempts = 0
         self.locked_until = 0
+        self._load_lock_state()
+        
+        self.last_activity = time.time()
+        self.bind_all("<Any-KeyPress>", self._reset_timer)
+        self.bind_all("<Any-Button>", self._reset_timer)
+        self.bind_all("<Motion>", self._reset_timer)
+        self._check_auto_lock()
         
         self.bind_all("<Control-s>", lambda e: self.save_entry())
         self.bind_all("<Control-n>", lambda e: self.focus_new_entry())
@@ -60,13 +68,40 @@ class DracoSafeNano(ctk.CTk):
         
         self.init_login()
     
+    def _reset_timer(self, event=None):
+        self.last_activity = time.time()
+        
+    def _check_auto_lock(self):
+        if self.master_password is not None:
+            if time.time() - self.last_activity > 300:
+                self.lock()
+                return
+        self.after(1000, self._check_auto_lock)
+        
+    def _load_lock_state(self):
+        if os.path.exists(self.lock_file):
+            try:
+                with open(self.lock_file, "r") as f:
+                    state = json.load(f)
+                    self.login_attempts = state.get("attempts", 0)
+                    self.locked_until = state.get("locked_until", 0)
+            except:
+                pass
+
+    def _save_lock_state(self):
+        try:
+            with open(self.lock_file, "w") as f:
+                json.dump({"attempts": self.login_attempts, "locked_until": self.locked_until}, f)
+        except:
+            pass
+
     # ===== VERSCHLÜSSELUNG =====
-    def _derive_key(self, password, salt):
-        kdf = PBKDF2HMAC(hashes.SHA256(), 32, salt, 200000)
+    def _derive_key(self, password, salt, iterations=600000):
+        kdf = PBKDF2HMAC(hashes.SHA256(), 32, salt, iterations)
         return kdf.derive(password.encode())
     
     def _encrypt(self, data, password, salt):
-        key = self._derive_key(password, salt)
+        key = self._derive_key(password, salt, 600000)
         nonce = os.urandom(12)
         cipher = Cipher(algorithms.AES(key), modes.GCM(nonce))
         encryptor = cipher.encryptor()
@@ -81,14 +116,16 @@ class DracoSafeNano(ctk.CTk):
         nonce = encrypted[16:28]
         tag = encrypted[28:44]
         ciphertext = encrypted[44:]
-        try:
-            key = self._derive_key(password, salt)
-            cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag))
-            decryptor = cipher.decryptor()
-            plaintext = decryptor.update(ciphertext) + decryptor.finalize()
-            return json.loads(plaintext.decode())
-        except:
-            return None
+        for iters in [600000, 200000]:
+            try:
+                key = self._derive_key(password, salt, iters)
+                cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag))
+                decryptor = cipher.decryptor()
+                plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+                return json.loads(plaintext.decode())
+            except:
+                continue
+        return None
     
     def _load_vault(self, password):
         if not os.path.exists(self.vault_file):
@@ -129,16 +166,11 @@ class DracoSafeNano(ctk.CTk):
         self.shift = not self.shift
         for btn in self.key_buttons:
             text = btn.cget("text")
-            if len(text) == 1 and text.isalpha():
+            if text.isalpha() and (len(text) == 1 or text in ('SS', 'ß')):
                 if self.shift:
                     btn.configure(text=text.upper())
                 else:
-                    btn.configure(text=text.lower())
-            elif text in ['Ä', 'Ö', 'Ü', 'ß']:
-                if self.shift:
-                    btn.configure(text=text.upper())
-                else:
-                    btn.configure(text=text.lower())
+                    btn.configure(text='ß' if text == 'SS' else text.lower())
         if self.shift_btn:
             self.shift_btn.configure(fg_color="#2ecc71" if self.shift else FARBE_GRUEN_HELL)
     
@@ -147,18 +179,18 @@ class DracoSafeNano(ctk.CTk):
             if self.shift and char.isalpha():
                 char = char.upper()
             if isinstance(self.current_focus, ctk.CTkEntry):
-                self.current_focus.insert(ctk.END, char)
+                self.current_focus.insert("insert", char)
             elif isinstance(self.current_focus, ctk.CTkTextbox):
-                self.current_focus.insert(ctk.END, char)
+                self.current_focus.insert("insert", char)
     
     def key_backspace(self):
         if self.current_focus:
             if isinstance(self.current_focus, ctk.CTkEntry):
-                text = self.current_focus.get()
-                self.current_focus.delete(0, "end")
-                self.current_focus.insert(0, text[:-1])
+                idx = self.current_focus.index("insert")
+                if idx > 0:
+                    self.current_focus.delete(idx - 1, idx)
             elif isinstance(self.current_focus, ctk.CTkTextbox):
-                self.current_focus.delete("end-2c", "end-1c")
+                self.current_focus.delete("insert-1c", "insert")
     
     def key_clear(self):
         if self.current_focus:
@@ -264,6 +296,22 @@ class DracoSafeNano(ctk.CTk):
         else:
             self.pw1.configure(show="*")
             self.show_pw_btn.configure(text="👁")
+            
+    def _secure_copy(self, text):
+        if text:
+            self.clipboard_clear()
+            self.clipboard_append(text)
+            self.update()
+            if hasattr(self, '_clear_clipboard_id') and self._clear_clipboard_id:
+                self.after_cancel(self._clear_clipboard_id)
+            def clear():
+                try:
+                    if self.clipboard_get() == text:
+                        self.clipboard_clear()
+                        self.update()
+                except:
+                    pass
+            self._clear_clipboard_id = self.after(15000, clear)
     
     def login(self):
         now = time.time()
@@ -285,9 +333,12 @@ class DracoSafeNano(ctk.CTk):
                 self.login_attempts += 1
                 if self.login_attempts >= 3:
                     self.locked_until = now + 300
+                    self._save_lock_state()
                     messagebox.showerror("Gesperrt", "3 Fehlversuche. Login für 5 Minuten gesperrt.")
                     self.login_attempts = 0
+                    self._save_lock_state()
                     return
+                self._save_lock_state()
                 messagebox.showerror("Fehler", "Falsches Passwort!")
                 return
             else:
@@ -301,6 +352,7 @@ class DracoSafeNano(ctk.CTk):
             self.data = data
             self.master_password = p1
             self.login_attempts = 0
+            self._save_lock_state()
         
         self.login_frame.pack_forget()
         self.main_app()
@@ -363,31 +415,33 @@ class DracoSafeNano(ctk.CTk):
         
         ctk.CTkLabel(grid, text="Dienst:", width=70).grid(row=0, column=0, padx=5, pady=2, sticky="e")
         self.e_service = ctk.CTkEntry(grid, width=300)
-        self.e_service.grid(row=0, column=1, columnspan=3, padx=5, pady=2, sticky="w")
+        self.e_service.grid(row=0, column=1, columnspan=4, padx=5, pady=2, sticky="w")
         self.e_service.bind("<FocusIn>", lambda e: self.set_focus(self.e_service))
         
         ctk.CTkLabel(grid, text="Benutzer:", width=70).grid(row=1, column=0, padx=5, pady=2, sticky="e")
         self.e_user = ctk.CTkEntry(grid, width=200)
         self.e_user.grid(row=1, column=1, padx=5, pady=2, sticky="w")
         self.e_user.bind("<FocusIn>", lambda e: self.set_focus(self.e_user))
+        ctk.CTkButton(grid, text="📋", width=30, fg_color="#4A4A4A", command=lambda: self._secure_copy(self.e_user.get())).grid(row=1, column=2, padx=5, pady=2, sticky="w")
         
         ctk.CTkLabel(grid, text="Passwort:", width=70).grid(row=2, column=0, padx=5, pady=2, sticky="e")
         self.e_pass = ctk.CTkEntry(grid, width=200)
         self.e_pass.grid(row=2, column=1, padx=5, pady=2, sticky="w")
         self.e_pass.bind("<FocusIn>", lambda e: self.set_focus(self.e_pass))
+        ctk.CTkButton(grid, text="📋", width=30, fg_color="#4A4A4A", command=lambda: self._secure_copy(self.e_pass.get())).grid(row=2, column=2, padx=5, pady=2, sticky="w")
         self.pw_strength = ctk.CTkLabel(grid, text="", width=80)
-        self.pw_strength.grid(row=2, column=2, padx=5, pady=2)
+        self.pw_strength.grid(row=2, column=3, padx=5, pady=2)
         self.e_pass.bind("<KeyRelease>", self.check_strength)
-        ctk.CTkButton(grid, text="🎲 Generator", width=100, fg_color=FARBE_GRUEN_HELL, command=self.gen_password).grid(row=2, column=3, padx=5, pady=2)
+        ctk.CTkButton(grid, text="🎲 Generator", width=100, fg_color=FARBE_GRUEN_HELL, command=self.gen_password).grid(row=2, column=4, padx=5, pady=2)
         
         ctk.CTkLabel(grid, text="URL:", width=70).grid(row=3, column=0, padx=5, pady=2, sticky="e")
         self.e_url = ctk.CTkEntry(grid, width=400)
-        self.e_url.grid(row=3, column=1, columnspan=3, padx=5, pady=2, sticky="w")
+        self.e_url.grid(row=3, column=1, columnspan=4, padx=5, pady=2, sticky="w")
         self.e_url.bind("<FocusIn>", lambda e: self.set_focus(self.e_url))
         
         ctk.CTkLabel(grid, text="Notiz:", width=70).grid(row=4, column=0, padx=5, pady=2, sticky="ne")
         self.e_note = ctk.CTkTextbox(grid, height=50, width=400, fg_color=FARBE_DUNKEL)
-        self.e_note.grid(row=4, column=1, columnspan=3, padx=5, pady=2, sticky="w")
+        self.e_note.grid(row=4, column=1, columnspan=4, padx=5, pady=2, sticky="w")
         self.e_note.bind("<FocusIn>", lambda e: self.set_focus(self.e_note))
         
         btn_row = ctk.CTkFrame(form, fg_color="transparent")
@@ -455,21 +509,24 @@ class DracoSafeNano(ctk.CTk):
             idx = self.entry_list.index("@0,%d" % e.y).split('.')[0]
             line = self.entry_list.get(f"{idx}.0", f"{idx}.end").strip()
             if line and not line.startswith("Keine"):
-                parts = line.split(" | ")
-                if len(parts) >= 3:
+                entries = [entry for entry in self.data["entries"] if entry.get("category") == self.current_category]
+                if self.search_entry.get():
+                    term = self.search_entry.get().lower()
+                    entries = [entry for entry in entries if term in entry.get("service", "").lower() or term in entry.get("user", "").lower()]
+                
+                line_index = int(idx) - 1
+                if 0 <= line_index < len(entries):
+                    entry = entries[line_index]
                     self.e_service.delete(0, "end")
-                    self.e_service.insert(0, parts[0])
+                    self.e_service.insert(0, entry.get("service", ""))
                     self.e_user.delete(0, "end")
-                    self.e_user.insert(0, parts[1])
+                    self.e_user.insert(0, entry.get("user", ""))
                     self.e_pass.delete(0, "end")
-                    self.e_pass.insert(0, parts[2])
-                    for entry in self.data["entries"]:
-                        if entry.get("category") == self.current_category and entry["service"] == parts[0]:
-                            self.e_url.delete(0, "end")
-                            self.e_url.insert(0, entry.get("url", ""))
-                            self.e_note.delete("1.0", "end")
-                            self.e_note.insert("1.0", entry.get("note", ""))
-                            break
+                    self.e_pass.insert(0, entry.get("password", ""))
+                    self.e_url.delete(0, "end")
+                    self.e_url.insert(0, entry.get("url", ""))
+                    self.e_note.delete("1.0", "end")
+                    self.e_note.insert("1.0", entry.get("note", ""))
         except:
             pass
     
@@ -570,8 +627,10 @@ class DracoSafeNano(ctk.CTk):
         if path:
             try:
                 # Verschlüsselte Kopie der Daten erstellen
+                export_data = self.data.copy()
                 salt = os.urandom(16)
-                encrypted = self._encrypt(self.data, self.master_password, salt)
+                export_data["salt"] = base64.b64encode(salt).decode()
+                encrypted = self._encrypt(export_data, self.master_password, salt)
                 with open(path, "wb") as f:
                     f.write(encrypted)
                 messagebox.showinfo("Erfolg", 
