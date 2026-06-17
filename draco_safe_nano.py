@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Draco-Safe Nano - Der einfache, sichere Passwort-Manager
-Version 1.1.9 | Freeware | MIT-Lizenz
+Version 1.2.0 | Freeware | MIT-Lizenz
 """
 import os, sys, json, secrets, string, hashlib, base64, re, time, shutil, webbrowser
 from tkinter import messagebox, filedialog
@@ -24,7 +24,7 @@ HOMEPAGE = "https://dracondors-heim.de"
 class DracoSafeNano(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Draco-Safe Nano v1.1.9")
+        self.title("Draco-Safe Nano v1.2.0")
         self.geometry("1100x800")
         self.resizable(True, True)
         self.configure(fg_color=FARBE_DUNKEL)
